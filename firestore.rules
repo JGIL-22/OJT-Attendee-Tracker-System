@@ -1,0 +1,64 @@
+// firestore.rules
+// ── Firestore Security Rules ──────────────────────────────────────
+// Deploy via: firebase deploy --only firestore:rules
+// These rules replace ALL Google Apps Script secret-key checks.
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper functions ────────────────────────────────────────
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    function isAppOwner() {
+      return isSignedIn() && getUserRole() == 'owner';
+    }
+
+    // ── User Profiles ───────────────────────────────────────────
+    // Users can only read/write their own profile
+    match /users/{uid} {
+      allow read:  if isOwner(uid) || isAppOwner();
+      allow write: if isOwner(uid);
+    }
+
+    // ── Attendance (sessions + absents) ─────────────────────────
+    // Each user controls their own attendance subcollections
+    match /attendance/{uid}/{subcollection}/{docId} {
+      allow read:   if isOwner(uid) || isAppOwner();
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid);
+      allow delete: if isOwner(uid) || isAppOwner();
+    }
+
+    // ── Login Logs ───────────────────────────────────────────────
+    match /loginLogs/{uid}/events/{eventId} {
+      allow read:   if isOwner(uid) || isAppOwner();
+      allow create: if isOwner(uid);
+      allow delete: if isAppOwner();
+    }
+
+    // ── Schedule (shared, owner-managed) ────────────────────────
+    // Anyone signed in can read; only owner can write
+    match /schedule/{docId} {
+      allow read:  if isSignedIn();
+      allow write: if isAppOwner();
+    }
+
+    // ── Settings (per user) ──────────────────────────────────────
+    match /settings/{uid} {
+      allow read, write: if isOwner(uid);
+    }
+
+    // ── Deny everything else ─────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
